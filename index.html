@@ -140,6 +140,10 @@
   </div>
 
 <script>
+    // --- ★ 設定：請填入您的 Google Apps Script 部署網址 (Exec) ---
+    const GAS_API_URL = "https://script.google.com/macros/s/xxxxxxxxx/exec"; // <--- 請修改這裡
+    // -----------------------------------------------------------
+
     // --- 全域變數 ---
     let allEmployeeData = {}; 
     let currentEmp = ""; 
@@ -160,7 +164,16 @@
       if (pageId === 'details') loadDetails();
     }
 
-    // --- ★ 新增：處理 Excel 檔案上傳 ---
+    // --- ★ 核心：API 呼叫小幫手 (取代 google.script.run) ---
+    function callApi(action, data = null) {
+        return fetch(GAS_API_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: action, data: data }) // 傳送 JSON 格式
+        })
+        .then(res => res.json()); // 解析回傳的 JSON
+    }
+
+    // --- 處理 Excel 檔案上傳 ---
     function handleFileUpload(input) {
         const file = input.files[0];
         if (!file) return;
@@ -184,20 +197,24 @@
                     }
                 }
 
-                statusText.innerText = "⏳ 正在匯入資料到 Google Sheet...";
+                statusText.innerText = "⏳ 正在傳送資料到後端...";
                 
-                google.script.run
-                    .withSuccessHandler(function(res) {
-                        statusText.innerText = "✅ 匯入成功！數據已更新";
-                        statusText.style.color = '#27ae60';
-                        loadSummary(); 
+                // ★ 改用 API 呼叫
+                callApi('importCleanData', jsonData)
+                    .then(res => {
+                        if(res.status === 'success') {
+                            statusText.innerText = "✅ " + res.message;
+                            statusText.style.color = '#27ae60';
+                            loadSummary(); 
+                        } else {
+                            throw new Error(res.message);
+                        }
                     })
-                    .withFailureHandler(function(err) {
-                        statusText.innerText = "❌ 匯入失敗";
+                    .catch(err => {
+                        statusText.innerText = "❌ 匯入失敗: " + err.message;
                         statusText.style.color = '#c0392b';
                         console.error(err);
-                    })
-                    .importCleanData(jsonData); 
+                    });
                     
             } catch (err) {
                 statusText.innerText = "❌ Excel 解析失敗";
@@ -211,13 +228,16 @@
 
     // --- 1. 薪資總覽 (含總計) ---
     function loadSummary() {
-      google.script.run.withSuccessHandler(renderSummary).getSalaryDashboardData();
+      // ★ 改用 API 呼叫
+      callApi('getSalaryDashboardData')
+        .then(data => renderSummary(data))
+        .catch(err => console.error("無法載入總覽", err));
     }
     
     function renderSummary(data) {
       document.getElementById('summary-loader').style.display = 'none';
       const statusText = document.getElementById('status-text');
-      if(statusText.innerText === '⏳ 正在執行...請稍候') {
+      if(statusText.innerText.includes('正在執行')) {
            statusText.innerText = '數據已更新';
       }
 
@@ -274,17 +294,20 @@
       `;
     }
 
-    // --- 新增：更新 G 欄倍數 ---
+    // --- 更新 G 欄倍數 ---
     function updateMulti(selectEl, rowIndex) {
       const newVal = selectEl.value;
       const salaryCell = document.getElementById(`salary-${rowIndex}`);
       salaryCell.style.opacity = '0.5';
       
-      google.script.run.withSuccessHandler(function(newSalary) {
-        salaryCell.innerText = newSalary;
-        salaryCell.style.opacity = '1';
-        recalcTotalFooter(); 
-      }).updateSalaryMultiplier(rowIndex, newVal);
+      // ★ 改用 API 呼叫 (傳送 rowIndex 和 value)
+      callApi('updateSalaryMultiplier', { rowIndex: rowIndex, value: newVal })
+        .then(newSalary => {
+            salaryCell.innerText = newSalary;
+            salaryCell.style.opacity = '1';
+            recalcTotalFooter(); 
+        })
+        .catch(err => console.error(err));
     }
     
     function recalcTotalFooter() {
@@ -299,7 +322,10 @@
 
     // --- 2. 每日獎金 ---
     function loadRevenue() {
-      google.script.run.withSuccessHandler(renderRevenue).getDailyBonusTable();
+      // ★ 改用 API 呼叫
+      callApi('getDailyBonusTable')
+        .then(res => renderRevenue(res))
+        .catch(err => console.error(err));
     }
     
     function renderRevenue(res) {
@@ -386,18 +412,25 @@
       const newVal = selectEl.value;
       const bonusCell = document.getElementById(`bonus-${rowIndex}`);
       bonusCell.innerText = '...'; 
-      google.script.run.withSuccessHandler(function(newBonus) {
-        bonusCell.innerText = newBonus; 
-        loadRevenue(); 
-      }).updateDailyRevenue(rowIndex, newVal);
+      
+      // ★ 改用 API 呼叫
+      callApi('updateDailyRevenue', { rowIndex: rowIndex, value: newVal })
+        .then(newBonus => {
+            bonusCell.innerText = newBonus; 
+            loadRevenue(); 
+        })
+        .catch(err => console.error(err));
     }
 
     // --- 3. 打卡明細 ---
     function loadDetails() {
-      google.script.run.withSuccessHandler(initEmployeeTabs).getEmployeeDetailData();
+      // ★ 改用 API 呼叫
+      callApi('getEmployeeDetailData')
+        .then(data => initEmployeeTabs(data))
+        .catch(err => console.error(err));
     }
     
-    // --- 3. 打卡明細 (修正版：指定員工排序) ---
+    // --- 3. 打卡明細 (排序邏輯不變) ---
     function initEmployeeTabs(data) {
       allEmployeeData = data;
       document.getElementById('detail-loader').style.display = 'none';
@@ -406,14 +439,11 @@
       const tabContainer = document.getElementById('empTabs');
       tabContainer.innerHTML = '';
 
-      // 取得資料中的所有名字
       let names = Object.keys(data);
       if (names.length === 0) { tabContainer.innerHTML = '無資料'; return; }
 
-      // ★ 設定您想要的順序
       const preferredOrder = ["黃久玲", "黃雨柔", "梁素華", "簡于婷"];
 
-      // ★ 重新排序
       names.sort((a, b) => {
         let indexA = preferredOrder.indexOf(a);
         let indexB = preferredOrder.indexOf(b);
@@ -424,7 +454,6 @@
         return 0;
       });
 
-      // 依照排好的順序產生按鈕
       names.forEach((name, index) => {
         const btn = document.createElement('button');
         btn.className = 'emp-tab-btn' + (index === 0 ? ' active' : '');
@@ -433,17 +462,13 @@
         tabContainer.appendChild(btn);
       });
 
-      // 預設顯示排序後的第一位
       if(!currentEmp) currentEmp = names[0];
-      // 確保 currentEmp 存在於新資料中，否則重置
       if(!names.includes(currentEmp)) currentEmp = names[0];
       
-      // 找到對應的按鈕設為 active
       const allBtns = document.querySelectorAll('.emp-tab-btn');
       allBtns.forEach(b => {
           if(b.innerText === currentEmp) {
               b.classList.add('active');
-              // 移除其他的 active (因為上面 forEach 可能設了 index 0 為 active)
               allBtns.forEach(others => { if(others !== b) others.classList.remove('active'); });
           }
       });
@@ -491,7 +516,7 @@
       `;
     }
 
-    // --- 通用執行函式 (訊息顯示優化) ---
+    // --- 通用執行函式 (按鈕觸發) ---
     function runFunc(functionName) {
       const statusText = document.getElementById('status-text');
       
@@ -499,24 +524,23 @@
       statusText.innerText = `⏳ 正在執行...請稍候`;
       statusText.style.color = '#666'; // 灰色
       
-      google.script.run.withSuccessHandler((res) => { 
-           // 2. 執行成功後
-           if (res && typeof res === 'string') {
-              statusText.innerText = res; 
-              statusText.style.color = '#27ae60'; // 綠色
-           } else {
-              statusText.innerText = '✅ 執行完成！';
-              statusText.style.color = '#27ae60';
-           }
-           
-           // 3. 刷新資料表
-           loadSummary(); 
-
-      }).withFailureHandler((err) => {
-           console.error(err); 
-           statusText.innerText = '❌ 發生錯誤: ' + err; 
-           statusText.style.color = '#c0392b'; // 紅色
-      })[functionName]();
+      // ★ 改用 API 呼叫 (action 就是 functionName)
+      callApi(functionName)
+          .then(res => {
+               if (res.status === 'success') {
+                  statusText.innerText = res.message || '✅ 執行完成！';
+                  statusText.style.color = '#27ae60';
+               } else {
+                  throw new Error(res.message);
+               }
+               // 3. 刷新資料表
+               loadSummary(); 
+          })
+          .catch(err => {
+               console.error(err); 
+               statusText.innerText = '❌ 發生錯誤: ' + err.message; 
+               statusText.style.color = '#c0392b'; 
+          });
     }
   </script>
 </body>
