@@ -1,1 +1,294 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+      body { font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif; padding: 15px; background: #f4f4f4; text-align: center; color: #333; }
+      .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+      h3 { margin-top: 0; margin-bottom: 15px; font-weight: 600; color: #2c3e50; }
+      
+      /* UI 元件樣式 */
+      select { width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: #fff; box-sizing: border-box; }
+      
+      .btn { 
+        display: block; width: 100%; padding: 12px; margin-top: 10px; 
+        border: none; border-radius: 6px; cursor: pointer; 
+        font-size: 15px; font-weight: 500; transition: all 0.2s ease; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+      .btn:active { transform: translateY(1px); box-shadow: none; }
+      .btn:disabled { background: #ccc !important; cursor: not-allowed; transform: none; box-shadow: none; }
 
+      .btn-load { background: #17a2b8; color: white; }    /* 青色：讀取列表 */
+      .btn-load:hover { background: #138496; }
+
+      .btn-action { background: #28a745; color: white; }  /* 綠色：執行匯入 */
+      .btn-action:hover { background: #218838; }
+
+      .btn-primary { background: #007bff; color: white; } /* 藍色：手動 */
+      .btn-primary:hover { background: #0056b3; }
+      
+      .divider { margin: 25px 0; border-top: 1px solid #e0e0e0; position: relative; }
+      .divider span { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: white; padding: 0 12px; color: #999; font-size: 12px; }
+
+      #log { margin-top: 15px; font-size: 13px; text-align: left; background: #2d3436; color: #dfe6e9; padding: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; display: none; font-family: monospace; }
+      
+      /* 隱藏區塊 */
+      #driveSection { display: none; margin-top: 15px; animation: fadeIn 0.5s; }
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      
+      input[type="file"] { margin-top: 10px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h3>📁 打卡資料匯入系統</h3>
+      
+      <button id="loadListBtn" class="btn btn-load" onclick="loadDriveList()">
+        📂 載入雲端檔案列表
+      </button>
+
+      <div id="driveSection">
+        <select id="fileSelect">
+           <option value="">載入中...</option>
+        </select>
+        <button id="autoImportBtn" class="btn btn-action" onclick="importSelectedFile()">
+           ⬇️ 匯入選取的檔案
+        </button>
+      </div>
+
+      <div class="divider"><span>或 手動上傳</span></div>
+
+      <p style="margin:0 0 5px; font-size:14px; color:#666;">選擇電腦中的 Excel 檔案</p>
+      <input type="file" id="excelFile" accept=".xlsx, .xls, .csv" />
+      <button id="manualBtn" class="btn btn-primary" onclick="manualImport()">
+        🚀 手動匯入
+      </button>
+      
+      <div id="log"></div>
+    </div>
+
+    <script>
+      // === 輔助函式 ===
+      function log(msg, type='') {
+        const logDiv = document.getElementById('log');
+        logDiv.style.display = 'block';
+        
+        let color = '#dfe6e9'; // 預設白
+        if (type === 'error') color = '#ff7675'; // 紅
+        if (type === 'success') color = '#55efc4'; // 綠
+        
+        const timestamp = new Date().toLocaleTimeString('en-US', {hour12: false});
+        logDiv.innerHTML += `<div style="color:${color}; border-bottom:1px solid #444; padding:2px 0;">[${timestamp}] ${msg}</div>`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+      }
+
+      function toggleAll(isLoading, loadingText = '') {
+         const ids = ['loadListBtn', 'autoImportBtn', 'manualBtn', 'fileSelect', 'excelFile'];
+         ids.forEach(id => {
+            const el = document.getElementById(id);
+            if(el) el.disabled = isLoading;
+         });
+         
+         // 簡單的 Loading 視覺回饋
+         if(loadingText) {
+             document.activeElement.setAttribute('data-original-text', document.activeElement.innerText);
+             document.activeElement.innerText = loadingText;
+         } else {
+             // 恢復文字 (如果需要的話，這裡簡化處理，直接恢復功能)
+             const loadBtn = document.getElementById('loadListBtn');
+             if(loadBtn.innerText === '⏳ 讀取中...') loadBtn.innerText = '📂 載入雲端檔案列表';
+         }
+      }
+
+      // --- 功能 1：載入列表 ---
+      function loadDriveList() {
+         const btn = document.getElementById('loadListBtn');
+         const originalText = btn.innerText;
+         btn.innerText = "⏳ 讀取中...";
+         
+         toggleAll(true);
+         log("📡 連線 Google Drive...");
+         
+         google.script.run
+           .withSuccessHandler(function(list) {
+              const select = document.getElementById('fileSelect');
+              select.innerHTML = ""; 
+              
+              if (list.length === 0) {
+                 select.innerHTML = "<option>❌ 找不到 XLSX 檔案</option>";
+                 log("⚠️ 資料夾內沒有 Excel 檔案", 'error');
+              } else {
+                 list.forEach(f => {
+                    let opt = document.createElement('option');
+                    opt.value = f.id;
+                    let dateStr = new Date(f.updated).toLocaleDateString();
+                    opt.text = `[${dateStr}] ${f.name}`;
+                    select.add(opt);
+                 });
+                 document.getElementById('driveSection').style.display = 'block';
+                 log(`✅ 列表載入完成，共 ${list.length} 個檔案。`, 'success');
+              }
+              btn.innerText = originalText;
+              toggleAll(false);
+           })
+           .withFailureHandler(function(err) {
+              log("❌ 讀取列表失敗: " + err.message, 'error');
+              btn.innerText = originalText;
+              toggleAll(false);
+           })
+           .getDriveFileList();
+      }
+
+      // --- 功能 2：匯入選取的檔案 ---
+      function importSelectedFile() {
+         const fileId = document.getElementById('fileSelect').value;
+         if (!fileId) return;
+
+         const btn = document.getElementById('autoImportBtn');
+         const originalText = btn.innerText;
+         btn.innerText = "📥 下載解析中...";
+
+         toggleAll(true);
+         log("🔄 開始下載檔案...");
+
+         google.script.run
+           .withSuccessHandler(function(res) {
+              log(`📥 下載完成 (${res.filename})，開始解析...`);
+              
+              // Base64 解碼
+              try {
+                  const binaryString = window.atob(res.base64);
+                  const len = binaryString.length;
+                  const bytes = new Uint8Array(len);
+                  for (let i = 0; i < len; i++) {
+                      bytes[i] = binaryString.charCodeAt(i);
+                  }
+                  processData(bytes);
+                  btn.innerText = originalText;
+              } catch (e) {
+                  log("❌ 解析失敗: " + e.message, 'error');
+                  btn.innerText = originalText;
+                  toggleAll(false);
+              }
+           })
+           .withFailureHandler(function(err) {
+              log("❌ 下載失敗: " + err.message, 'error');
+              btn.innerText = originalText;
+              toggleAll(false);
+           })
+           .getFileContentById(fileId);
+      }
+
+      // --- 功能 3：手動匯入 ---
+      function manualImport() {
+        const fileInput = document.getElementById('excelFile');
+        if (typeof XLSX === 'undefined') { log("❌ Excel 工具包載入失敗", 'error'); return; }
+        if (fileInput.files.length === 0) { log("❌ 請先選擇檔案", 'error'); return; }
+
+        const btn = document.getElementById('manualBtn');
+        const originalText = btn.innerText;
+        btn.innerText = "⏳ 處理中...";
+
+        toggleAll(true);
+        log("⏳ 讀取上傳檔案中...");
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const data = new Uint8Array(e.target.result);
+          processData(data);
+          btn.innerText = originalText;
+        };
+        reader.readAsArrayBuffer(fileInput.files[0]);
+      }
+
+      // ==========================================================
+      // ★★★ 黃金解析邏輯 (Golden Logic) ★★★
+      // ==========================================================
+      function processData(data) {
+        try {
+            const workbook = XLSX.read(data, {type: 'array'});
+            
+            if (workbook.SheetNames.length < 2) throw new Error("此檔案只有 1 個分頁，找不到第 2 頁 (Rawdata)！");
+            const sheetName = workbook.SheetNames[1]; 
+            log(`📄 讀取分頁: [${sheetName}]`);
+            
+            const worksheet = workbook.Sheets[sheetName];
+            const rawData = XLSX.utils.sheet_to_json(worksheet, {header: 1, defval: ""});
+
+            if (rawData.length < 2) throw new Error("檔案內容是空的");
+
+            // --- 精準定位 ---
+            let headerRowIndex = -1;
+            let colMap = { name: -1, date: -1, type: -1, shift: -1, start: -1, end: -1, base: -1 };
+
+            for (let i = 0; i < Math.min(rawData.length, 20); i++) {
+               const rowStr = JSON.stringify(rawData[i]);
+               if (rowStr.includes("姓名") && rowStr.includes("打卡日期")) {
+                   headerRowIndex = i;
+                   log(`✅ 找到標題 (Row ${i+1})`);
+                   
+                   rawData[i].forEach((cell, idx) => {
+                       const txt = String(cell).trim();
+                       if (txt === "姓名") colMap.name = idx;
+                       else if (txt === "打卡日期") colMap.date = idx;
+                       else if (txt === "日期類別") colMap.type = idx;
+                       else if (txt === "班別") colMap.shift = idx;
+                       else if (txt === "上班打卡時間") colMap.start = idx;
+                       else if (txt === "下班打卡時間") colMap.end = idx;
+                       else if (txt === "計薪基準工時") colMap.base = idx;
+                   });
+                   break;
+               }
+            }
+
+            if (headerRowIndex === -1 || colMap.name === -1) throw new Error("❌ 找不到標題列");
+            if (colMap.start === -1) throw new Error("❌ 找不到 [上班打卡時間]");
+            
+            // --- 抓取資料 ---
+            const mergedMap = {}; 
+            for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+                const row = rawData[i];
+                const name = row[colMap.name];
+                const date = row[colMap.date];
+
+                if (!name || !date) continue; 
+
+                const key = name + "_" + date;
+                let currentBase = (colMap.base !== -1) ? row[colMap.base] : "";
+
+                if (!mergedMap[key]) {
+                    mergedMap[key] = {
+                        name: name, date: date, type: row[colMap.type], shift: row[colMap.shift],
+                        start: "--", end: "--", base: currentBase
+                    };
+                } else {
+                    if ((!mergedMap[key].base) && currentBase) mergedMap[key].base = currentBase;
+                }
+
+                const startVal = row[colMap.start];
+                const endVal = row[colMap.end];
+                if (startVal && String(startVal).trim() !== "--") mergedMap[key].start = startVal;
+                if (endVal && String(endVal).trim() !== "--") mergedMap[key].end = endVal;
+            }
+
+            const cleanData = Object.values(mergedMap).map(item => {
+                return [ item.name, item.date, item.type, item.shift, item.start, item.end, item.base ];
+            });
+
+            log(`📦 解析完成，準備寫入 ${cleanData.length} 筆資料...`);
+
+            google.script.run
+              .withSuccessHandler(() => { log("🎉 匯入成功！", 'success'); toggleAll(false); })
+              .withFailureHandler((err) => { log("❌ 匯入失敗: " + err.message, 'error'); toggleAll(false); })
+              .importCleanData(cleanData);
+
+          } catch (err) {
+            log("❌ 處理錯誤: " + err.message, 'error');
+            toggleAll(false);
+          }
+      }
+    </script>
+  </body>
+</html>
