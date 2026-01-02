@@ -139,9 +139,14 @@
 
   </div>
 
+<script src="config.js"></script>
 <script>
-    // --- ★ 設定：請填入您的 Google Apps Script 部署網址 (Exec) ---
-    const GAS_API_URL = "https://script.google.com/macros/s/xxxxxxxxx/exec"; // <--- 請修改這裡
+    // --- ★ 2. 修改這裡：從設定檔讀取網址 ---
+    // 檢查 CONFIG 是否有載入成功，若無則報錯
+    if (typeof CONFIG === 'undefined') {
+        alert("錯誤：找不到 config.js，請確認檔案已上傳至 GitHub。");
+    }
+    const GAS_API_URL = CONFIG.API_URL; 
     // -----------------------------------------------------------
 
     // --- 全域變數 ---
