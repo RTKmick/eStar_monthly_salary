@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    :root { --primary: #2c3e50; --accent: #3498db; --bg: #f4f7f6; --text: #333; }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); margin: 0; padding: 0; color: var(--text); }
+    
+    /* 導覽列 */
+    .navbar { background: white; padding: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); display: flex; justify-content: center; gap: 10px; position: sticky; top: 0; z-index: 100;}
+    .nav-btn { border: none; background: transparent; padding: 10px 20px; font-size: 16px; font-weight: bold; color: #7f8c8d; cursor: pointer; border-bottom: 3px solid transparent; transition: 0.3s; }
+    .nav-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* 容器 */
+    .container { max-width: 1000px; margin: 20px auto; padding: 0 15px; }
+    .page-section { display: none; animation: fadeIn 0.3s; }
+    .page-section.active { display: block; }
+
+    /* 按鈕群組 */
+    .control-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .btn { padding: 12px; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; font-size: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .btn:active { transform: scale(0.98); }
+    .btn-green { background: #27ae60; }
+    .btn-blue { background: #2980b9; }
+    .btn-orange { background: #e67e22; }
+    .btn-gray { background: #7f8c8d; }
+
+    /* 表格樣式 */
+    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); overflow-x: auto; margin-bottom: 20px;}
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 600px; }
+    th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+    th { background: #f8f9fa; color: #555; white-space: nowrap; font-weight: bold;}
+    
+    /* 顏色與強調 */
+    .col-money { text-align: right; color: #c0392b; font-weight: bold; font-family: 'Roboto', sans-serif; }
+    .col-bonus { color: #d35400; font-weight: bold; text-align: right; }
+    .bg-holiday { background-color: #fff0f0; } 
+    .text-holiday { color: red; font-weight: bold; }
+    .bg-missing { background-color: #ffff00; }    
+    
+    /* 總計列樣式 */
+    .row-total { background-color: #fff8e1; font-weight: bold; border-top: 2px solid #ddd; }
+    .total-label { text-align: right; color: #333; }
+    .total-val { font-size: 16px; color: #d35400; }
+    .total-salary-val { font-size: 18px; color: #c0392b; background: #ffebee; padding: 5px 10px; border-radius: 4px; display: inline-block;}
+
+    /* 員工總工時 (藍色大字) */
+    .emp-total-row { background-color: #e3f2fd; }
+    .emp-total-text { font-size: 18px; color: #1976d2; font-weight: bold; text-align: right; padding-right: 20px;}
+
+    /* 員工切換按鈕 */
+    .emp-tabs { display: flex; gap: 10px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 5px; }
+    .emp-tab-btn { padding: 8px 16px; background: #eee; border-radius: 20px; border: none; cursor: pointer; white-space: nowrap; transition: 0.2s; }
+    .emp-tab-btn.active { background: var(--accent); color: white; box-shadow: 0 2px 5px rgba(52, 152, 219, 0.4); }
+
+    /* 下拉選單 */
+    select.revenue-select { padding: 6px; border-radius: 4px; border: 1px solid #ddd; background: #fff; width: 100%; font-size: 14px;}
+    
+    .loader { text-align: center; padding: 20px; color: #888; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+  <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" style="display:none" onchange="handleFileUpload(this)">
+
+  <div class="navbar">
+    <div style="position: absolute; left: 15px; color: #999; font-size: 18px;">eStar 薪資系統 V1.0.7</div>
+    <button class="nav-btn active" onclick="switchPage('summary')">💰 薪資總覽</button>
+    <button class="nav-btn" onclick="switchPage('revenue')">📅 每日獎金</button>
+    <button class="nav-btn" onclick="switchPage('details')">打卡明細</button>
+  </div>
+
+  <div class="container">
+    
+    <div id="page-summary" class="page-section active">
+      <div class="control-panel">
+        <button class="btn btn-green" onclick="document.getElementById('fileInput').click()">📂 1. 匯入打卡之星(紀錄)</button>
+        <button class="btn btn-blue" onclick="runFunc('calculateAllowanceAndHours')">⚡ 2. 計算津貼工時</button>
+        <button class="btn btn-orange" onclick="runFunc('calculatePerformanceBonus')">💰 3. 計算業績獎金</button>
+        <button class="btn btn-gray" onclick="runFunc('backupAndExportUBB')">💾 4. 備份報表</button>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 15px 0;">📊 當月薪資結算</h3>
+        <div id="summary-loader" class="loader">載入中...</div>
+        <table id="summaryTable" style="display:none;">
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th style="text-align:right">總工時</th>
+              <th style="text-align:right">伙食津貼</th>
+              <th style="text-align:right">業績獎金</th>
+              <th style="text-align:center">實拿倍數 (G)</th>
+              <th style="text-align:right">職務獎金 (H)</th>
+              <th class="col-money">實發薪資</th>
+            </tr>
+          </thead>
+          <tbody id="summaryBody"></tbody>
+          <tfoot id="summaryFooter"></tfoot>
+        </table>
+      </div>
+      <div id="status-text" style="text-align:center; color:#888; margin-top:10px; font-size:12px;"></div>
+    </div>
+
+    <div id="page-revenue" class="page-section">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin:0 0 5px 0;">
+          <h3 style="margin:0;">📅 每日獎金與分紅表</h3>
+          <div style="font-size:13px; color:#555;">
+            <span style="margin-right:4px;">薪資月份：</span>
+            <select id="monthSelect" onchange="onMonthChange(this.value)" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+              <option value="1">1月</option>
+              <option value="2">2月</option>
+              <option value="3">3月</option>
+              <option value="4">4月</option>
+              <option value="5">5月</option>
+              <option value="6">6月</option>
+              <option value="7">7月</option>
+              <option value="8">8月</option>
+              <option value="9">9月</option>
+              <option value="10">10月</option>
+              <option value="11">11月</option>
+              <option value="12">12月</option>
+            </select>
+          </div>
+        </div>
+        <p style="color:#666; font-size:13px; margin-bottom:15px;">調整下拉選單可即時更新</p>
+        <div id="revenue-loader" class="loader">讀取中...</div>
+        <table id="revenueTable" style="display:none;">
+          <thead id="revenueHead"></thead>
+          <tbody id="revenueBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="page-details" class="page-section">
+      <div class="emp-tabs" id="empTabs"></div>
+      
+      <div class="card">
+        <h3 id="detailTitle" style="margin:0 0 15px 0;">員工上班工時</h3>
+        <div id="detail-loader" class="loader">讀取中...</div>
+        <table id="detailTable" style="display:none;">
+          <thead>
+            <tr><th>日期</th><th>類別</th><th>班別</th><th>上班</th><th>下班</th><th style="text-align:right">工時</th><th style="text-align:right">伙食津貼</th></tr>
+          </thead>
+          <tbody id="detailBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+    // --- 全域變數 ---
+    let allEmployeeData = {}; 
+    let currentEmp = ""; 
+
+    // --- 初始化 ---
+    window.onload = function() {
+      loadSummary(); 
+    };
+
+    function switchPage(pageId) {
+      document.querySelectorAll('.page-section').forEach(el => el.classList.remove('active'));
+      document.getElementById('page-' + pageId).classList.add('active');
+      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+      event.target.classList.add('active');
+
+      if (pageId === 'summary') loadSummary();
+      if (pageId === 'revenue') loadRevenue();
+      if (pageId === 'details') loadDetails();
+    }
+
+    // ==========================================================
+    // ★★★ Step 1: 修正後的檔案匯入與解析邏輯 (整合版) ★★★
+    // ==========================================================
+    function handleFileUpload(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const statusText = document.getElementById('status-text');
+        statusText.innerText = "⏳ 正在讀取 Excel 檔案...";
+        statusText.style.color = "#666";
+        
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            
+            try {
+                // 1. 讀取 Excel
+                const workbook = XLSX.read(data, {type: 'array'});
+                
+                // 檢查是否至少有 2 頁 (通常 Raw Data 在第二頁)
+                let targetSheetName = workbook.SheetNames[1] || workbook.SheetNames[0];
+                console.log("讀取工作表:", targetSheetName);
+                
+                const worksheet = workbook.Sheets[targetSheetName];
+                // 轉為 JSON 陣列 (含空值)
+                const rawData = XLSX.utils.sheet_to_json(worksheet, {header: 1, defval: ""});
+
+                if (rawData.length < 2) throw new Error("檔案內容過少");
+
+                // 2. 精準定位標題列 (尋找 '姓名' 與 '打卡日期')
+                let headerRowIndex = -1;
+                let colMap = { name: -1, date: -1, type: -1, shift: -1, start: -1, end: -1, base: -1 };
+
+                for (let i = 0; i < Math.min(rawData.length, 20); i++) {
+                    const rowStr = JSON.stringify(rawData[i]);
+                    if (rowStr.includes("姓名") && rowStr.includes("打卡日期")) {
+                        headerRowIndex = i;
+                        
+                        rawData[i].forEach((cell, idx) => {
+                            const txt = String(cell).trim();
+                            if (txt === "姓名") colMap.name = idx;
+                            else if (txt === "打卡日期") colMap.date = idx;
+                            else if (txt === "日期類別") colMap.type = idx;
+                            else if (txt === "班別") colMap.shift = idx;
+                            else if (txt === "上班打卡時間") colMap.start = idx;
+                            else if (txt === "下班打卡時間") colMap.end = idx;
+                            else if (txt === "計薪基準工時") colMap.base = idx;
+                        });
+                        break;
+                    }
+                }
+
+                if (headerRowIndex === -1 || colMap.name === -1) throw new Error("找不到標題列 (需包含 '姓名' 與 '打卡日期')");
+                
+                // 3. 抓取並清洗資料
+                const mergedMap = {}; 
+                for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+                    const row = rawData[i];
+                    const name = row[colMap.name];
+                    const date = row[colMap.date];
+
+                    if (!name || !date) continue; 
+
+                    const key = name + "_" + date;
+                    let currentBase = (colMap.base !== -1) ? row[colMap.base] : "";
+
+                    // 初始化物件
+                    if (!mergedMap[key]) {
+                        mergedMap[key] = {
+                            name: name, date: date, type: row[colMap.type], shift: row[colMap.shift],
+                            start: "--", end: "--", base: currentBase
+                        };
+                    } else {
+                        // 如果有新的基準工時，更新進去
+                        if ((!mergedMap[key].base) && currentBase) mergedMap[key].base = currentBase;
+                    }
+
+                    // 處理上下班時間 (不覆蓋已有的有效值)
+                    const startVal = row[colMap.start];
+                    const endVal = row[colMap.end];
+                    if (startVal && String(startVal).trim() !== "--") mergedMap[key].start = startVal;
+                    if (endVal && String(endVal).trim() !== "--") mergedMap[key].end = endVal;
+                }
+
+                // 4. 轉回後端需要的 Array 格式
+                // 格式: [姓名, 日期, 類別, 班別, 上班, 下班, 基準工時(給後端計算用)]
+                const cleanData = Object.values(mergedMap).map(item => {
+                    return [ item.name, item.date, item.type, item.shift, item.start, item.end, item.base ];
+                });
+
+                statusText.innerText = `⏳ 解析完成，正在匯入 ${cleanData.length} 筆資料...`;
+
+                // 5. 傳送給後端
+                google.script.run
+                    .withSuccessHandler(function(res) {
+                        statusText.innerText = "✅ 匯入成功！";
+                        statusText.style.color = "#27ae60";
+                        alert("匯入成功！");
+                        loadSummary(); // 重新整理畫面
+                    })
+                    .withFailureHandler(function(err) {
+                        statusText.innerText = "❌ 匯入失敗";
+                        statusText.style.color = "#c0392b";
+                        alert("匯入失敗: " + err);
+                    })
+                    .importCleanData(cleanData); 
+                    
+            } catch (err) {
+                console.error(err);
+                statusText.innerText = "❌ 解析失敗: " + err.message;
+                statusText.style.color = "#c0392b";
+                alert("解析 Excel 失敗：" + err.message);
+            }
+        };
+        
+        reader.readAsArrayBuffer(file);
+        // 清空 input 讓同一檔案可重複上傳
+        input.value = '';
+    }
+
+    // --- 1. 薪資總覽 (含總計) ---
+    function loadSummary() {
+      google.script.run.withSuccessHandler(renderSummary).getSalaryDashboardData();
+    }
+    
+    function renderSummary(data) {
+      document.getElementById('summary-loader').style.display = 'none';
+      
+      const table = document.getElementById('summaryTable');
+      const tbody = document.getElementById('summaryBody');
+      const tfoot = document.getElementById('summaryFooter');
+      
+      tbody.innerHTML = '';
+      tfoot.innerHTML = '';
+      table.style.display = 'table';
+
+      if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">無資料</td></tr>';
+        return;
+      }
+
+      let totalBonus = 0;
+      let totalSalary = 0;
+      const multiOptions = ["1", "0.9", "0.8", "0.7", "0.6"];
+
+      data.forEach(row => {
+        let bonusVal = parseFloat(String(row.bonus).replace(/[$,]/g, '')) || 0;
+        let salaryVal = parseFloat(String(row.salary).replace(/[$,]/g, '')) || 0;
+        
+        totalBonus += bonusVal;
+        totalSalary += salaryVal;
+
+        let selectHtml = `<select class="revenue-select" style="text-align:center;" onchange="updateMulti(this, ${row.rowIndex})">`;
+        multiOptions.forEach(opt => {
+          let isSelected = (String(row.multiplier) == String(opt)) ? 'selected' : '';
+          selectHtml += `<option value="${opt}" ${isSelected}>${opt}</option>`;
+        });
+        selectHtml += `</select>`;
+
+        tbody.innerHTML += `
+          <tr>
+            <td>${row.name}</td>
+            <td style="text-align:right">${row.hours}</td>
+            <td style="text-align:right">${row.meal}</td>
+            <td style="text-align:right">${row.bonus.toLocaleString()}</td>
+            <td>${selectHtml}</td>
+            <td style="text-align:right">${row.jobBonus}</td>
+            <td class="col-money" id="salary-${row.rowIndex}">${row.salary}</td>
+          </tr>`;
+      });
+
+      tfoot.innerHTML = `
+        <tr class="row-total">
+          <td colspan="3" class="total-label">總計：</td>
+          <td class="total-val" style="text-align:right">${totalBonus.toLocaleString()}</td>
+          <td colspan="2"></td>
+          <td style="text-align:right"><span class="total-salary-val">$${totalSalary.toLocaleString()}</span></td>
+        </tr>
+      `;
+    }
+
+    // --- 新增：更新 G 欄倍數 ---
+    function updateMulti(selectEl, rowIndex) {
+      const newVal = selectEl.value;
+      const salaryCell = document.getElementById(`salary-${rowIndex}`);
+      salaryCell.style.opacity = '0.5';
+      
+      google.script.run.withSuccessHandler(function(newSalary) {
+        salaryCell.innerText = newSalary;
+        salaryCell.style.opacity = '1';
+        recalcTotalFooter(); 
+      }).updateSalaryMultiplier(rowIndex, newVal);
+    }
+    
+    function recalcTotalFooter() {
+       let total = 0;
+       document.querySelectorAll('td[id^="salary-"]').forEach(td => {
+           let val = parseFloat(td.innerText.replace(/[$,]/g, '')) || 0;
+           total += val;
+       });
+       const totalEl = document.querySelector('.total-salary-val');
+       if(totalEl) totalEl.innerText = '$' + total.toLocaleString();
+    }
+
+    // --- 2. 每日獎金 ---
+    function loadRevenue() {
+      google.script.run.withSuccessHandler(renderRevenue).getDailyBonusTable();
+    }
+    
+    function renderRevenue(res) {
+      document.getElementById('revenue-loader').style.display = 'none';
+
+      // 根據後端回傳的 selectedMonth 設定月份下拉選單
+      const monthSelect = document.getElementById('monthSelect');
+      if (monthSelect && res && res.selectedMonth) {
+        monthSelect.value = String(res.selectedMonth);
+      }
+      
+      const table = document.getElementById('revenueTable');
+      const thead = document.getElementById('revenueHead');
+      const tbody = document.getElementById('revenueBody');
+      
+      tbody.innerHTML = '';
+      table.style.display = 'table';
+
+      let empTotals = [];
+      if (res.empNames && res.empNames.length > 0) {
+        empTotals = new Array(res.empNames.length).fill(0);
+        res.data.forEach(row => {
+           if (row.empBonuses && row.empBonuses.length > 0) {
+              row.empBonuses.forEach((val, index) => {
+                 let num = parseFloat(String(val).replace(/[^\d.-]/g, '')) || 0;
+                 empTotals[index] += num;
+              });
+           }
+        });
+      }
+
+      let headerHtml = `<tr style="background-color:#fffdf5; border-bottom:none;">
+                            <th colspan="4" style="text-align:right; color:#888; border-bottom:none; font-size:12px;">員工當月獎金總計 ➔</th>`;
+      
+      empTotals.forEach(total => {
+          headerHtml += `<th style="text-align:right; color:#c0392b; font-size:18px; border-bottom:none;">${total}</th>`;
+      });
+      headerHtml += `</tr>`;
+
+      headerHtml += `<tr>
+                        <th style="background:#f8f9fa;">日期</th>
+                        <th style="background:#f8f9fa;">星期</th>
+                        <th style="background:#f8f9fa;">當日營業額</th>
+                        <th style="text-align:right; background:#f8f9fa;">當日獎金</th>`;
+      
+      if(res.empNames && res.empNames.length > 0) {
+        res.empNames.forEach(name => {
+          if(name) headerHtml += `<th style="text-align:right; color:#333; background:#f8f9fa;">${name}</th>`;
+        });
+      }
+      headerHtml += `</tr>`;
+      thead.innerHTML = headerHtml;
+
+      const optionsWeekday = ["--", "5.5K", "6.5K"];
+      const optionsHoliday = ["--", "9K", "10K", "11K", "12K"];
+
+      res.data.forEach(row => {
+        const isHoliday = row.week.includes('六') || row.week.includes('日');
+        const textClass = isHoliday ? 'text-holiday' : '';
+        const bgClass = isHoliday ? 'bg-holiday' : '';
+        const currentOptions = isHoliday ? optionsHoliday : optionsWeekday;
+
+        let selectHtml = `<select class="revenue-select" onchange="updateRev(this, ${row.rowIndex})">`;
+        currentOptions.forEach(opt => {
+          let selected = (row.revenue == opt) ? 'selected' : '';
+          selectHtml += `<option value="${opt}" ${selected}>${opt}</option>`;
+        });
+        selectHtml += `</select>`;
+
+        let empColsHtml = "";
+        if(row.empBonuses && row.empBonuses.length > 0) {
+            row.empBonuses.forEach(val => {
+                let colorStyle = (val == 0 || val == "0") ? "color:#ccc;" : "color:#333;";
+                empColsHtml += `<td style="text-align:right; ${colorStyle}">${val}</td>`;
+            });
+        }
+
+        tbody.innerHTML += `
+          <tr class="${bgClass}">
+            <td class="${textClass}">${row.date}</td>
+            <td class="${textClass}">${row.week}</td>
+            <td>${selectHtml}</td>
+            <td class="col-bonus" id="bonus-${row.rowIndex}">${row.totalBonus}</td>
+            ${empColsHtml}
+          </tr>`;
+      });
+    }
+
+    // --- 依月份切換獎金表 ---
+    function onMonthChange(val) {
+      const m = parseInt(val, 10);
+      if (!m) return;
+      document.getElementById('revenue-loader').style.display = 'block';
+      document.getElementById('revenueTable').style.display = 'none';
+      google.script.run.withSuccessHandler(function() {
+        loadRevenue();
+      }).changeBonusMonth(m);
+    }
+
+    function updateRev(selectEl, rowIndex) {
+      const newVal = selectEl.value;
+      const bonusCell = document.getElementById(`bonus-${rowIndex}`);
+      bonusCell.innerText = '...'; 
+      google.script.run.withSuccessHandler(function(newBonus) {
+        bonusCell.innerText = newBonus; 
+        loadRevenue(); 
+      }).updateDailyRevenue(rowIndex, newVal);
+    }
+
+    // --- 3. 打卡明細 ---
+    function loadDetails() {
+      google.script.run.withSuccessHandler(initEmployeeTabs).getEmployeeDetailData();
+    }
+    
+    function initEmployeeTabs(data) {
+      allEmployeeData = data;
+      document.getElementById('detail-loader').style.display = 'none';
+      document.getElementById('detailTable').style.display = 'table';
+      
+      const tabContainer = document.getElementById('empTabs');
+      tabContainer.innerHTML = '';
+
+      let names = Object.keys(data);
+      if (names.length === 0) { tabContainer.innerHTML = '無資料'; return; }
+
+      const preferredOrder = ["黃久玲", "黃雨柔", "梁素華", "簡于婷"];
+
+      names.sort((a, b) => {
+        let indexA = preferredOrder.indexOf(a);
+        let indexB = preferredOrder.indexOf(b);
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return 0;
+      });
+
+      names.forEach((name, index) => {
+        const btn = document.createElement('button');
+        btn.className = 'emp-tab-btn' + (index === 0 ? ' active' : '');
+        btn.innerText = name;
+        btn.onclick = function() { switchEmployee(name, this); };
+        tabContainer.appendChild(btn);
+      });
+
+      currentEmp = names[0];
+      renderEmployeeTable(currentEmp);
+    }
+
+    function switchEmployee(name, btnEl) {
+      currentEmp = name;
+      document.querySelectorAll('.emp-tab-btn').forEach(b => b.classList.remove('active'));
+      btnEl.classList.add('active');
+      renderEmployeeTable(name);
+    }
+
+    function renderEmployeeTable(name) {
+      const tbody = document.getElementById('detailBody');
+      const title = document.getElementById('detailTitle');
+      tbody.innerHTML = '';
+
+      const records = allEmployeeData[name] || [];
+      let totalHours = 0; 
+      let totalMeal = 0;
+      const weekMap = ['(日)', '(一)', '(二)', '(三)', '(四)', '(五)', '(六)'];
+
+      records.forEach(r => {
+        totalHours += parseFloat(r.hours) || 0;
+        totalMeal  += parseFloat(r.meal)  || 0;
+
+        let dateWithWeek = r.date;
+        let isWeekend = false; // 新增：用來標記是否為週末
+
+        if (r.date) {
+          let d = new Date(r.date + " 12:00:00"); // 使用中午時間避免時區誤差
+          if (!isNaN(d.getTime())) {
+            let dayNum = d.getDay();
+            dateWithWeek = `${r.date} ${weekMap[dayNum]}`;
+            // ★ 判斷是否為週六 (6) 或 週日 (0)
+            if (dayNum === 0 || dayNum === 6) {
+              isWeekend = true;
+            }
+          }
+        }
+
+        // 樣式判斷邏輯
+        let typeStr = String(r.type || ""); 
+        let startStr = String(r.start || "").trim(); 
+        let endStr = String(r.end || "").trim(); 
+
+        let isRestDay = typeStr.includes("休息日") || typeStr.includes("排班人員休假日");
+        let isMissing = (startStr === '--' || startStr === '') && (endStr === '--' || endStr === '');
+
+        // 設定文字樣式：如果是週末，使用紅色粗體樣式
+        let textStyle = isWeekend ? 'color: red; font-weight: bold;' : 'color: #333;';
+
+        let bgClass = '';
+        if (isRestDay) {
+            bgClass = 'bg-holiday'; 
+        } else if (isMissing) {
+            bgClass = 'bg-missing'; 
+        } 
+
+        // 將樣式套用到整列的 <td> 中
+        tbody.innerHTML += `
+          <tr class="${bgClass}" style="${textStyle}">
+            <td>${dateWithWeek}</td> 
+            <td>${r.type}</td>
+            <td>${r.shift}</td>
+            <td>${r.start}</td>
+            <td>${r.end}</td>
+            <td style="text-align:right">${r.hours}</td>
+            <td style="text-align:right">${r.meal || 0}</td>
+          </tr>`;
+      });
+
+      // 更新標題為「姓名 - 總工時:xxx，津貼總計:yyy」
+      title.innerHTML = `${name} - 總工時:<span style="color:#1976d2; font-weight:bold; margin-left:4px; margin-right:8px;">${totalHours}</span>津貼總計:<span style="color:#1976d2; font-weight:bold; margin-left:4px;">${totalMeal}</span>`;
+    }
+
+    // --- 通用執行函式 ---
+    function runFunc(functionName) {
+      const statusText = document.getElementById('status-text');
+      statusText.innerText = `⏳ 正在執行...請稍候`;
+      statusText.style.color = '#666'; 
+      
+      google.script.run.withSuccessHandler((res) => { 
+           if (res && typeof res === 'string') {
+              statusText.innerText = res; 
+              statusText.style.color = '#27ae60'; 
+           } else {
+              statusText.innerText = '✅ 執行完成！';
+           }
+           loadSummary(); 
+      }).withFailureHandler((err) => {
+           console.error(err); 
+           statusText.innerText = '❌ 發生錯誤: ' + err; 
+           statusText.style.color = '#c0392b'; 
+      })[functionName]();
+    }
+</script>
+</body>
+</html>
+
