@@ -1,0 +1,20 @@
+{
+  "name": "estar_monthly_salary",
+  "version": "1.0.0",
+  "description": "eStar monthly salary Apps Script project",
+  "main": "Code.gs",
+  "scripts": {
+    "gas:status": "clasp status",
+    "gas:pull": "clasp pull",
+    "gas:push": "clasp push",
+    "gas:open": "clasp open",
+    "gas:deploy": "clasp deploy"
+  },
+  "keywords": [],
+  "author": "msung",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@google/clasp": "^3.3.0"
+  }
+}
