@@ -1,27 +1,24 @@
 // --- 網頁版入口 ---
-function doGet() {
+function doGet(e) {
   // JSON / JSONP API mode (for GitHub Pages; avoids CORS by using <script src=...>)
-  if (arguments && arguments.length > 0) {
-    const e = arguments[0];
-    const action = e && e.parameter ? String(e.parameter.action || '') : '';
-    if (action) {
-      const callback = e.parameter ? String(e.parameter.callback || '') : '';
-      const dataRaw = e.parameter ? String(e.parameter.data || '') : '';
-      const data = dataRaw ? JSON.parse(decodeURIComponent(dataRaw)) : null;
-      const result = apiDispatch_(action, data);
-      const json = JSON.stringify(result);
+  const action = e && e.parameter ? String(e.parameter.action || '') : '';
+  if (action) {
+    const callback = e.parameter ? String(e.parameter.callback || '') : '';
+    const dataRaw = e.parameter ? String(e.parameter.data || '') : '';
+    const data = dataRaw ? JSON.parse(decodeURIComponent(dataRaw)) : null;
+    const result = apiDispatch_(action, data);
+    const json = JSON.stringify(result);
 
-      if (callback) {
-        // JSONP
-        return ContentService
-          .createTextOutput(`${callback}(${json});`)
-          .setMimeType(ContentService.MimeType.JAVASCRIPT);
-      }
-
+    if (callback) {
+      // JSONP
       return ContentService
-        .createTextOutput(json)
-        .setMimeType(ContentService.MimeType.JSON);
+        .createTextOutput(`${callback}(${json});`)
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
     }
+
+    return ContentService
+      .createTextOutput(json)
+      .setMimeType(ContentService.MimeType.JSON);
   }
 
   // GAS web UI mode
