@@ -162,10 +162,31 @@
 
   </div>
 
+<script src="config.js"></script>
 <script>
     // --- 全域變數 ---
     let allEmployeeData = {}; 
     let currentEmp = ""; 
+
+    // --- GitHub Pages：後端 API 位置 ---
+    if (typeof CONFIG === 'undefined' || !CONFIG || !CONFIG.API_URL) {
+      alert("錯誤：找不到 config.js 或未設定 API_URL");
+    }
+    const GAS_API_URL = (CONFIG && CONFIG.API_URL) ? CONFIG.API_URL : '';
+
+    function callApi(action, data = null) {
+      return fetch(GAS_API_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: action, data: data })
+      }).then(res => res.json());
+    }
+
+    function setStatus(text, color) {
+      const statusText = document.getElementById('status-text');
+      if (!statusText) return;
+      statusText.innerText = text || '';
+      statusText.style.color = color || '#666';
+    }
 
     // --- 初始化 ---
     window.onload = function() {
@@ -276,20 +297,22 @@
 
                 statusText.innerText = `⏳ 解析完成，正在匯入 ${cleanData.length} 筆資料...`;
 
-                // 5. 傳送給後端
-                google.script.run
-                    .withSuccessHandler(function(res) {
-                        statusText.innerText = "✅ 匯入成功！";
-                        statusText.style.color = "#27ae60";
-                        alert("匯入成功！");
-                        loadSummary(); // 重新整理畫面
-                    })
-                    .withFailureHandler(function(err) {
-                        statusText.innerText = "❌ 匯入失敗";
-                        statusText.style.color = "#c0392b";
-                        alert("匯入失敗: " + err);
-                    })
-                    .importCleanData(cleanData); 
+                // 5. 傳送給後端（改用 API）
+                callApi('importCleanData', cleanData)
+                  .then(res => {
+                    if (res && res.status === 'success') {
+                      statusText.innerText = res.message || "✅ 匯入成功！";
+                      statusText.style.color = "#27ae60";
+                      loadSummary();
+                      return;
+                    }
+                    throw new Error((res && res.message) ? res.message : '匯入失敗');
+                  })
+                  .catch(err => {
+                    statusText.innerText = "❌ 匯入失敗: " + (err && err.message ? err.message : err);
+                    statusText.style.color = "#c0392b";
+                    console.error(err);
+                  });
                     
             } catch (err) {
                 console.error(err);
@@ -310,15 +333,14 @@
       document.getElementById('summaryTable').style.display = 'none';
       document.getElementById('summaryHistoryWrap').innerHTML = '';
       document.getElementById('summaryHistoryHint').style.display = 'none';
-      google.script.run
-        .withSuccessHandler(renderSummary)
-        .withFailureHandler(function(err) {
+      callApi('getSalaryDashboardWithHistory')
+        .then(renderSummary)
+        .catch(function(err) {
           document.getElementById('summary-loader').style.display = 'none';
           document.getElementById('summaryTable').style.display = 'table';
           document.getElementById('summaryBody').innerHTML =
-            '<tr><td colspan="7" style="text-align:center;color:#c0392b;">讀取失敗：' + err + '</td></tr>';
-        })
-        .getSalaryDashboardWithHistory();
+            '<tr><td colspan="7" style="text-align:center;color:#c0392b;">讀取失敗：' + (err && err.message ? err.message : err) + '</td></tr>';
+        });
     }
 
     /** 歷史月表格 tbody，並加總業績獎金、實發薪資（與當月總計列一致） */
@@ -467,11 +489,16 @@
       const salaryCell = document.getElementById(`salary-${rowIndex}`);
       salaryCell.style.opacity = '0.5';
       
-      google.script.run.withSuccessHandler(function(newSalary) {
-        salaryCell.innerText = newSalary;
-        salaryCell.style.opacity = '1';
-        recalcTotalFooter(); 
-      }).updateSalaryMultiplier(rowIndex, newVal);
+      callApi('updateSalaryMultiplier', { rowIndex: rowIndex, value: newVal })
+        .then(function(newSalary) {
+          salaryCell.innerText = newSalary;
+          salaryCell.style.opacity = '1';
+          recalcTotalFooter();
+        })
+        .catch(function(err) {
+          salaryCell.style.opacity = '1';
+          setStatus('❌ 更新倍數失敗: ' + (err && err.message ? err.message : err), '#c0392b');
+        });
     }
     
     function recalcTotalFooter() {
@@ -486,7 +513,9 @@
 
     // --- 2. 每日獎金 ---
     function loadRevenue() {
-      google.script.run.withSuccessHandler(renderRevenue).getDailyBonusTable();
+      callApi('getDailyBonusTable')
+        .then(renderRevenue)
+        .catch(err => setStatus('❌ 讀取每日獎金失敗: ' + (err && err.message ? err.message : err), '#c0392b'));
     }
     
     function renderRevenue(res) {
@@ -581,24 +610,35 @@
       if (!m) return;
       document.getElementById('revenue-loader').style.display = 'block';
       document.getElementById('revenueTable').style.display = 'none';
-      google.script.run.withSuccessHandler(function() {
-        loadRevenue();
-      }).changeBonusMonth(m);
+      callApi('changeBonusMonth', { month: m })
+        .then(function() { loadRevenue(); })
+        .catch(function(err) {
+          setStatus('❌ 切換月份失敗: ' + (err && err.message ? err.message : err), '#c0392b');
+          document.getElementById('revenue-loader').style.display = 'none';
+          document.getElementById('revenueTable').style.display = 'table';
+        });
     }
 
     function updateRev(selectEl, rowIndex) {
       const newVal = selectEl.value;
       const bonusCell = document.getElementById(`bonus-${rowIndex}`);
       bonusCell.innerText = '...'; 
-      google.script.run.withSuccessHandler(function(newBonus) {
-        bonusCell.innerText = newBonus; 
-        loadRevenue(); 
-      }).updateDailyRevenue(rowIndex, newVal);
+      callApi('updateDailyRevenue', { rowIndex: rowIndex, value: newVal })
+        .then(function(newBonus) {
+          bonusCell.innerText = newBonus;
+          loadRevenue();
+        })
+        .catch(function(err) {
+          bonusCell.innerText = 'ERR';
+          setStatus('❌ 更新營業額失敗: ' + (err && err.message ? err.message : err), '#c0392b');
+        });
     }
 
     // --- 3. 打卡明細 ---
     function loadDetails() {
-      google.script.run.withSuccessHandler(initEmployeeTabs).getEmployeeDetailData();
+      callApi('getEmployeeDetailData')
+        .then(initEmployeeTabs)
+        .catch(err => setStatus('❌ 讀取打卡明細失敗: ' + (err && err.message ? err.message : err), '#c0392b'));
     }
     
     function initEmployeeTabs(data) {
@@ -708,23 +748,22 @@
 
     // --- 通用執行函式 ---
     function runFunc(functionName) {
-      const statusText = document.getElementById('status-text');
-      statusText.innerText = `⏳ 正在執行...請稍候`;
-      statusText.style.color = '#666'; 
-      
-      google.script.run.withSuccessHandler((res) => { 
-           if (res && typeof res === 'string') {
-              statusText.innerText = res; 
-              statusText.style.color = '#27ae60'; 
-           } else {
-              statusText.innerText = '✅ 執行完成！';
-           }
-           loadSummary(); 
-      }).withFailureHandler((err) => {
-           console.error(err); 
-           statusText.innerText = '❌ 發生錯誤: ' + err; 
-           statusText.style.color = '#c0392b'; 
-      })[functionName]();
+      setStatus('⏳ 正在執行...請稍候', '#666');
+      callApi(functionName)
+        .then(function(res) {
+          if (res && res.status === 'success') {
+            setStatus(res.message || '✅ 執行完成！', '#27ae60');
+          } else if (typeof res === 'string') {
+            setStatus(res, '#27ae60');
+          } else {
+            throw new Error((res && res.message) ? res.message : '執行失敗');
+          }
+          loadSummary();
+        })
+        .catch(function(err) {
+          console.error(err);
+          setStatus('❌ 發生錯誤: ' + (err && err.message ? err.message : err), '#c0392b');
+        });
     }
 </script>
 </body>

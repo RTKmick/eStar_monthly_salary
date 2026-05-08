@@ -8,6 +8,78 @@ function doGet() {
 }
 
 /**
+ * GitHub Pages 版本使用 fetch() 呼叫此 Web App。
+ * 注意：避免設定自訂 headers，讓請求維持「簡單請求」以降低 CORS / preflight 問題。
+ */
+function doPost(e) {
+  try {
+    const raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '';
+    const payload = raw ? JSON.parse(raw) : {};
+    const action = String(payload.action || '');
+    const data = payload.data;
+
+    if (!action) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ status: 'error', message: 'Missing action' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const runActions = new Set([
+      'calculateAllowanceAndHours',
+      'calculatePerformanceBonus',
+      'backupAndExportUBB',
+      'backupCurrentMonthSheet',
+      'runPayrollPipeline'
+    ]);
+
+    let result;
+    switch (action) {
+      case 'importCleanData':
+        importCleanData(Array.isArray(data) ? data : []);
+        result = { status: 'success', message: '✅ 匯入成功！' };
+        break;
+      case 'getSalaryDashboardData':
+        result = getSalaryDashboardData();
+        break;
+      case 'getSalaryDashboardWithHistory':
+        result = getSalaryDashboardWithHistory();
+        break;
+      case 'updateSalaryMultiplier':
+        result = updateSalaryMultiplier(data && data.rowIndex, data && data.value);
+        break;
+      case 'getDailyBonusTable':
+        result = getDailyBonusTable();
+        break;
+      case 'changeBonusMonth':
+        result = changeBonusMonth(data && data.month);
+        break;
+      case 'updateDailyRevenue':
+        result = updateDailyRevenue(data && data.rowIndex, data && data.value);
+        break;
+      case 'getEmployeeDetailData':
+        result = getEmployeeDetailData();
+        break;
+      default:
+        if (runActions.has(action) && typeof this[action] === 'function') {
+          const msg = this[action]();
+          result = { status: 'success', message: String(msg || '✅ 執行完成！') };
+        } else {
+          result = { status: 'error', message: 'Unknown action: ' + action };
+        }
+        break;
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'error', message: String(err && err.message ? err.message : err) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
  * 網頁版 / 觸發器執行時常沒有「使用中試算表」，getActiveSpreadsheet() 會為 null。
  * 若腳本是「獨立專案」，請把下方 SPREADSHEET_ID 改成你的試算表網址中 /d/ 與 /edit 之間那段 ID。
  */
