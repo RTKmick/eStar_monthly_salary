@@ -1,6 +1,6 @@
 {
   "name": "estar_monthly_salary",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "eStar monthly salary Apps Script project",
   "main": "Code.gs",
   "scripts": {

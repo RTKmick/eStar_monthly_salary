@@ -694,6 +694,23 @@ function calculateAllowanceAndHours() {
   }
 }
 
+// --- 一鍵執行薪資主流程：津貼/工時 + 業績獎金 ---
+function runPayrollPipeline() {
+  try {
+    const step1 = calculateAllowanceAndHours();
+    const step2 = calculatePerformanceBonus();
+    return [
+      "✅ 一鍵流程執行完成",
+      "-----",
+      String(step1 || ""),
+      "-----",
+      String(step2 || "")
+    ].join("\n");
+  } catch (e) {
+    return "❌ 一鍵流程失敗: " + e.message;
+  }
+}
+
 // --- 4. 備份當月薪資表 (整合版：產生分頁 + 存入 XLSX) ---
 function backupAndExportUBB() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();

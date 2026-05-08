@@ -68,10 +68,10 @@
   <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" style="display:none" onchange="handleFileUpload(this)">
 
   <div class="navbar">
-    <div style="position: absolute; left: 15px; color: #999; font-size: 18px;">eStar 薪資系統 V1.0.7</div>
-    <button class="nav-btn active" onclick="switchPage('summary')">💰 薪資總覽</button>
-    <button class="nav-btn" onclick="switchPage('revenue')">📅 每日獎金</button>
-    <button class="nav-btn" onclick="switchPage('details')">打卡明細</button>
+    <div style="position: absolute; left: 15px; color: #999; font-size: 18px;">eStar 薪資系統 V1.0.14</div>
+    <button class="nav-btn active" onclick="switchPage('summary', this)">💰 薪資總覽</button>
+    <button class="nav-btn" onclick="switchPage('revenue', this)">📅 每日獎金</button>
+    <button class="nav-btn" onclick="switchPage('details', this)">打卡明細</button>
   </div>
 
   <div class="container">
@@ -80,6 +80,7 @@
       <div class="control-panel">
         <button class="btn btn-green" onclick="document.getElementById('fileInput').click()">📂 1. 匯入打卡之星(紀錄)</button>
         <button class="btn btn-blue" onclick="runFunc('calculateAllowanceAndHours')">⚡ 2. 計算津貼工時</button>
+        <button class="btn btn-blue" onclick="runFunc('runPayrollPipeline')">🚀 2+3 一鍵計算</button>
         <button class="btn btn-orange" onclick="runFunc('calculatePerformanceBonus')">💰 3. 計算業績獎金</button>
         <button class="btn btn-gray" onclick="runFunc('backupAndExportUBB')">💾 4. 備份報表</button>
       </div>
@@ -164,11 +165,38 @@
       loadSummary(); 
     };
 
-    function switchPage(pageId) {
+    function getErrorMessage(err) {
+      if (!err) return '未知錯誤';
+      if (typeof err === 'string') return err;
+      if (err.message) return err.message;
+      return String(err);
+    }
+
+    function setStatus(text, color) {
+      const statusText = document.getElementById('status-text');
+      statusText.innerText = text;
+      statusText.style.color = color || '#666';
+    }
+
+    function callServer(functionName, args, onSuccess, onFailure) {
+      google.script.run
+        .withSuccessHandler(onSuccess)
+        .withFailureHandler(function(err) {
+          const msg = getErrorMessage(err);
+          if (typeof onFailure === 'function') {
+            onFailure(msg);
+            return;
+          }
+          setStatus('❌ 發生錯誤: ' + msg, '#c0392b');
+          console.error(err);
+        })[functionName].apply(null, args || []);
+    }
+
+    function switchPage(pageId, clickedBtn) {
       document.querySelectorAll('.page-section').forEach(el => el.classList.remove('active'));
       document.getElementById('page-' + pageId).classList.add('active');
       document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-      event.target.classList.add('active');
+      if (clickedBtn) clickedBtn.classList.add('active');
 
       if (pageId === 'summary') loadSummary();
       if (pageId === 'revenue') loadRevenue();
@@ -298,7 +326,7 @@
 
     // --- 1. 薪資總覽 (含總計) ---
     function loadSummary() {
-      google.script.run.withSuccessHandler(renderSummary).getSalaryDashboardData();
+      callServer('getSalaryDashboardData', [], renderSummary);
     }
     
     function renderSummary(data) {
@@ -363,11 +391,14 @@
       const salaryCell = document.getElementById(`salary-${rowIndex}`);
       salaryCell.style.opacity = '0.5';
       
-      google.script.run.withSuccessHandler(function(newSalary) {
+      callServer('updateSalaryMultiplier', [rowIndex, newVal], function(newSalary) {
         salaryCell.innerText = newSalary;
         salaryCell.style.opacity = '1';
         recalcTotalFooter(); 
-      }).updateSalaryMultiplier(rowIndex, newVal);
+      }, function(msg) {
+        salaryCell.style.opacity = '1';
+        setStatus('❌ 更新倍數失敗: ' + msg, '#c0392b');
+      });
     }
     
     function recalcTotalFooter() {
@@ -382,7 +413,7 @@
 
     // --- 2. 每日獎金 ---
     function loadRevenue() {
-      google.script.run.withSuccessHandler(renderRevenue).getDailyBonusTable();
+      callServer('getDailyBonusTable', [], renderRevenue);
     }
     
     function renderRevenue(res) {
@@ -477,24 +508,29 @@
       if (!m) return;
       document.getElementById('revenue-loader').style.display = 'block';
       document.getElementById('revenueTable').style.display = 'none';
-      google.script.run.withSuccessHandler(function() {
+      callServer('changeBonusMonth', [m], function() {
         loadRevenue();
-      }).changeBonusMonth(m);
+      }, function(msg) {
+        setStatus('❌ 切換月份失敗: ' + msg, '#c0392b');
+      });
     }
 
     function updateRev(selectEl, rowIndex) {
       const newVal = selectEl.value;
       const bonusCell = document.getElementById(`bonus-${rowIndex}`);
       bonusCell.innerText = '...'; 
-      google.script.run.withSuccessHandler(function(newBonus) {
+      callServer('updateDailyRevenue', [rowIndex, newVal], function(newBonus) {
         bonusCell.innerText = newBonus; 
         loadRevenue(); 
-      }).updateDailyRevenue(rowIndex, newVal);
+      }, function(msg) {
+        bonusCell.innerText = 'ERR';
+        setStatus('❌ 更新營業額失敗: ' + msg, '#c0392b');
+      });
     }
 
     // --- 3. 打卡明細 ---
     function loadDetails() {
-      google.script.run.withSuccessHandler(initEmployeeTabs).getEmployeeDetailData();
+      callServer('getEmployeeDetailData', [], initEmployeeTabs);
     }
     
     function initEmployeeTabs(data) {
@@ -604,23 +640,15 @@
 
     // --- 通用執行函式 ---
     function runFunc(functionName) {
-      const statusText = document.getElementById('status-text');
-      statusText.innerText = `⏳ 正在執行...請稍候`;
-      statusText.style.color = '#666'; 
-      
-      google.script.run.withSuccessHandler((res) => { 
+      setStatus('⏳ 正在執行...請稍候', '#666');
+      callServer(functionName, [], (res) => { 
            if (res && typeof res === 'string') {
-              statusText.innerText = res; 
-              statusText.style.color = '#27ae60'; 
+              setStatus(res, '#27ae60');
            } else {
-              statusText.innerText = '✅ 執行完成！';
+              setStatus('✅ 執行完成！', '#27ae60');
            }
            loadSummary(); 
-      }).withFailureHandler((err) => {
-           console.error(err); 
-           statusText.innerText = '❌ 發生錯誤: ' + err; 
-           statusText.style.color = '#c0392b'; 
-      })[functionName]();
+      });
     }
 </script>
 </body>
