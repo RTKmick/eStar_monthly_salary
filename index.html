@@ -174,11 +174,67 @@
     }
     const GAS_API_URL = (CONFIG && CONFIG.API_URL) ? CONFIG.API_URL : '';
 
-    function callApi(action, data = null) {
-      return fetch(GAS_API_URL, {
-        method: "POST",
-        body: JSON.stringify({ action: action, data: data })
-      }).then(res => res.json());
+    function callApiJsonp(action, data = null) {
+      return new Promise((resolve, reject) => {
+        if (!GAS_API_URL) {
+          reject(new Error('未設定 API_URL'));
+          return;
+        }
+
+        const cb = '__jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+        const timeoutMs = 20000;
+        let done = false;
+
+        const cleanup = () => {
+          try { delete window[cb]; } catch (_) { window[cb] = undefined; }
+          if (script && script.parentNode) script.parentNode.removeChild(script);
+          if (timer) clearTimeout(timer);
+        };
+
+        window[cb] = (payload) => {
+          if (done) return;
+          done = true;
+          cleanup();
+          resolve(payload);
+        };
+
+        const timer = setTimeout(() => {
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error('請求逾時'));
+        }, timeoutMs);
+
+        const src =
+          GAS_API_URL +
+          (GAS_API_URL.includes('?') ? '&' : '?') +
+          'action=' + encodeURIComponent(action) +
+          '&callback=' + encodeURIComponent(cb) +
+          '&data=' + encodeURIComponent(encodeURIComponent(JSON.stringify(data)));
+
+        const script = document.createElement('script');
+        script.src = src;
+        script.onerror = () => {
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error('載入 API 失敗'));
+        };
+        document.head.appendChild(script);
+      });
+    }
+
+    function callServer(action, data) {
+      // GAS 網頁內（google.script.run） vs GitHub Pages（JSONP）
+      const hasGasRun = (typeof google !== 'undefined') && google.script && google.script.run;
+      if (hasGasRun) {
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)[action].apply(null, Array.isArray(data) ? data : []);
+        });
+      }
+      return callApiJsonp(action, data);
     }
 
     function setStatus(text, color) {
@@ -298,7 +354,7 @@
                 statusText.innerText = `⏳ 解析完成，正在匯入 ${cleanData.length} 筆資料...`;
 
                 // 5. 傳送給後端（改用 API）
-                callApi('importCleanData', cleanData)
+                callServer('importCleanData', cleanData)
                   .then(res => {
                     if (res && res.status === 'success') {
                       statusText.innerText = res.message || "✅ 匯入成功！";
@@ -333,7 +389,7 @@
       document.getElementById('summaryTable').style.display = 'none';
       document.getElementById('summaryHistoryWrap').innerHTML = '';
       document.getElementById('summaryHistoryHint').style.display = 'none';
-      callApi('getSalaryDashboardWithHistory')
+      callServer('getSalaryDashboardWithHistory')
         .then(renderSummary)
         .catch(function(err) {
           document.getElementById('summary-loader').style.display = 'none';
@@ -489,7 +545,7 @@
       const salaryCell = document.getElementById(`salary-${rowIndex}`);
       salaryCell.style.opacity = '0.5';
       
-      callApi('updateSalaryMultiplier', { rowIndex: rowIndex, value: newVal })
+      callServer('updateSalaryMultiplier', { rowIndex: rowIndex, value: newVal })
         .then(function(newSalary) {
           salaryCell.innerText = newSalary;
           salaryCell.style.opacity = '1';
@@ -513,7 +569,7 @@
 
     // --- 2. 每日獎金 ---
     function loadRevenue() {
-      callApi('getDailyBonusTable')
+      callServer('getDailyBonusTable')
         .then(renderRevenue)
         .catch(err => setStatus('❌ 讀取每日獎金失敗: ' + (err && err.message ? err.message : err), '#c0392b'));
     }
@@ -610,7 +666,7 @@
       if (!m) return;
       document.getElementById('revenue-loader').style.display = 'block';
       document.getElementById('revenueTable').style.display = 'none';
-      callApi('changeBonusMonth', { month: m })
+      callServer('changeBonusMonth', { month: m })
         .then(function() { loadRevenue(); })
         .catch(function(err) {
           setStatus('❌ 切換月份失敗: ' + (err && err.message ? err.message : err), '#c0392b');
@@ -623,7 +679,7 @@
       const newVal = selectEl.value;
       const bonusCell = document.getElementById(`bonus-${rowIndex}`);
       bonusCell.innerText = '...'; 
-      callApi('updateDailyRevenue', { rowIndex: rowIndex, value: newVal })
+      callServer('updateDailyRevenue', { rowIndex: rowIndex, value: newVal })
         .then(function(newBonus) {
           bonusCell.innerText = newBonus;
           loadRevenue();
@@ -636,7 +692,7 @@
 
     // --- 3. 打卡明細 ---
     function loadDetails() {
-      callApi('getEmployeeDetailData')
+      callServer('getEmployeeDetailData')
         .then(initEmployeeTabs)
         .catch(err => setStatus('❌ 讀取打卡明細失敗: ' + (err && err.message ? err.message : err), '#c0392b'));
     }
@@ -749,7 +805,7 @@
     // --- 通用執行函式 ---
     function runFunc(functionName) {
       setStatus('⏳ 正在執行...請稍候', '#666');
-      callApi(functionName)
+      callServer(functionName)
         .then(function(res) {
           if (res && res.status === 'success') {
             setStatus(res.message || '✅ 執行完成！', '#27ae60');

@@ -1,5 +1,30 @@
 // --- 網頁版入口 ---
 function doGet() {
+  // JSON / JSONP API mode (for GitHub Pages; avoids CORS by using <script src=...>)
+  if (arguments && arguments.length > 0) {
+    const e = arguments[0];
+    const action = e && e.parameter ? String(e.parameter.action || '') : '';
+    if (action) {
+      const callback = e.parameter ? String(e.parameter.callback || '') : '';
+      const dataRaw = e.parameter ? String(e.parameter.data || '') : '';
+      const data = dataRaw ? JSON.parse(decodeURIComponent(dataRaw)) : null;
+      const result = apiDispatch_(action, data);
+      const json = JSON.stringify(result);
+
+      if (callback) {
+        // JSONP
+        return ContentService
+          .createTextOutput(`${callback}(${json});`)
+          .setMimeType(ContentService.MimeType.JAVASCRIPT);
+      }
+
+      return ContentService
+        .createTextOutput(json)
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  // GAS web UI mode
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('薪資管理系統')
@@ -24,50 +49,7 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    const runActions = new Set([
-      'calculateAllowanceAndHours',
-      'calculatePerformanceBonus',
-      'backupAndExportUBB',
-      'backupCurrentMonthSheet',
-      'runPayrollPipeline'
-    ]);
-
-    let result;
-    switch (action) {
-      case 'importCleanData':
-        importCleanData(Array.isArray(data) ? data : []);
-        result = { status: 'success', message: '✅ 匯入成功！' };
-        break;
-      case 'getSalaryDashboardData':
-        result = getSalaryDashboardData();
-        break;
-      case 'getSalaryDashboardWithHistory':
-        result = getSalaryDashboardWithHistory();
-        break;
-      case 'updateSalaryMultiplier':
-        result = updateSalaryMultiplier(data && data.rowIndex, data && data.value);
-        break;
-      case 'getDailyBonusTable':
-        result = getDailyBonusTable();
-        break;
-      case 'changeBonusMonth':
-        result = changeBonusMonth(data && data.month);
-        break;
-      case 'updateDailyRevenue':
-        result = updateDailyRevenue(data && data.rowIndex, data && data.value);
-        break;
-      case 'getEmployeeDetailData':
-        result = getEmployeeDetailData();
-        break;
-      default:
-        if (runActions.has(action) && typeof this[action] === 'function') {
-          const msg = this[action]();
-          result = { status: 'success', message: String(msg || '✅ 執行完成！') };
-        } else {
-          result = { status: 'error', message: 'Unknown action: ' + action };
-        }
-        break;
-    }
+    const result = apiDispatch_(action, data);
 
     return ContentService
       .createTextOutput(JSON.stringify(result))
@@ -76,6 +58,46 @@ function doPost(e) {
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'error', message: String(err && err.message ? err.message : err) }))
       .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function apiDispatch_(action, data) {
+  const runActions = new Set([
+    'calculateAllowanceAndHours',
+    'calculatePerformanceBonus',
+    'backupAndExportUBB',
+    'backupCurrentMonthSheet',
+    'runPayrollPipeline'
+  ]);
+
+  try {
+    switch (action) {
+      case 'importCleanData':
+        importCleanData(Array.isArray(data) ? data : []);
+        return { status: 'success', message: '✅ 匯入成功！' };
+      case 'getSalaryDashboardData':
+        return getSalaryDashboardData();
+      case 'getSalaryDashboardWithHistory':
+        return getSalaryDashboardWithHistory();
+      case 'updateSalaryMultiplier':
+        return updateSalaryMultiplier(data && data.rowIndex, data && data.value);
+      case 'getDailyBonusTable':
+        return getDailyBonusTable();
+      case 'changeBonusMonth':
+        return changeBonusMonth(data && data.month);
+      case 'updateDailyRevenue':
+        return updateDailyRevenue(data && data.rowIndex, data && data.value);
+      case 'getEmployeeDetailData':
+        return getEmployeeDetailData();
+      default:
+        if (runActions.has(action) && typeof this[action] === 'function') {
+          const msg = this[action]();
+          return { status: 'success', message: String(msg || '✅ 執行完成！') };
+        }
+        return { status: 'error', message: 'Unknown action: ' + action };
+    }
+  } catch (e) {
+    return { status: 'error', message: String(e && e.message ? e.message : e) };
   }
 }
 
