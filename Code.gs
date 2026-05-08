@@ -1,10 +1,10 @@
 // --- 網頁版入口 ---
 function doGet(e) {
   // JSON / JSONP API mode (for GitHub Pages; avoids CORS by using <script src=...>)
-  const action = e && e.parameter ? String(e.parameter.action || '') : '';
+  const action = getParamFromEvent_(e, 'action');
   if (action) {
-    const callback = e.parameter ? String(e.parameter.callback || '') : '';
-    const dataRaw = e.parameter ? String(e.parameter.data || '') : '';
+    const callback = getParamFromEvent_(e, 'callback');
+    const dataRaw = getParamFromEvent_(e, 'data');
     const data = dataRaw ? JSON.parse(decodeURIComponent(dataRaw)) : null;
     const result = apiDispatch_(action, data);
     const json = JSON.stringify(result);
@@ -27,6 +27,22 @@ function doGet(e) {
     .setTitle('薪資管理系統')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function getParamFromEvent_(e, key) {
+  if (!e) return '';
+  if (e.parameter && Object.prototype.hasOwnProperty.call(e.parameter, key)) {
+    return String(e.parameter[key] || '');
+  }
+  const qs = String(e.queryString || '');
+  if (!qs) return '';
+  const parts = qs.split('&');
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i].split('=');
+    const k = decodeURIComponent(seg[0] || '');
+    if (k === key) return decodeURIComponent(seg.slice(1).join('=') || '');
+  }
+  return '';
 }
 
 /**
