@@ -1,7 +1,7 @@
 // --- 網頁版入口 ---
 function doGet(e) {
   // JSON / JSONP API mode (for GitHub Pages; avoids CORS by using <script src=...>)
-  const action = getParamFromEvent_(e, 'action');
+  const action = getParamFromEvent_(e, 'apiAction') || getParamFromEvent_(e, 'action');
   if (action) {
     const callback = getParamFromEvent_(e, 'callback');
     const dataRaw = getParamFromEvent_(e, 'data');

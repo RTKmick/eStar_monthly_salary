@@ -208,7 +208,7 @@
         const src =
           GAS_API_URL +
           (GAS_API_URL.includes('?') ? '&' : '?') +
-          'action=' + encodeURIComponent(action) +
+          'apiAction=' + encodeURIComponent(action) +
           '&callback=' + encodeURIComponent(cb) +
           '&data=' + encodeURIComponent(encodeURIComponent(JSON.stringify(data)));
 
